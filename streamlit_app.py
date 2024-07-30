@@ -8,7 +8,7 @@ def main():
     st.header("About Me")
     st.write(
         """
-        Hi, I'm Deva, a passionate developer with expertise in various technologies. 
+        Hi, I'm Dev Anand, a passionate developer with expertise in various technologies. 
         I specialize in AI/ML, Python Full Stack, MERN Stack Development, FastAPI, and NGINX deployment.
         """
     )
