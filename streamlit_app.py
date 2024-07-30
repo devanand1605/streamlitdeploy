@@ -2,7 +2,7 @@ import streamlit as st
 
 def main():
     st.title("Deva's Portfolio")
-    st.write("Welcome to Deva's Portfolio Website")
+    st.write("Hey Devlopers.....!")
 
     # About Section
     st.header("About Me")
