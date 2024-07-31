@@ -1,88 +1,99 @@
 import streamlit as st
-from moviepy.editor import VideoFileClip, concatenate_videoclips
+import cv2
+import numpy as np
+from PIL import Image
+import tempfile
 import os
-from streamlit_drag_drop import st_drag_and_drop
 
-# Global variables
-video_clips = []
-audio_clips = []
+# Helper function to read video frames
+def read_frames(video_path):
+    cap = cv2.VideoCapture(video_path)
+    frames = []
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frames.append(frame)
+    cap.release()
+    return frames
+
+# Helper function to save video frames to a file
+def save_video(frames, output_path, fps):
+    height, width, _ = frames[0].shape
+    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+    for frame in frames:
+        out.write(frame)
+    out.release()
+
+# Global variables to store video and overlay layers
+video_frames = []
 overlays = []
-current_frame = None
 
-def upload_file():
-    uploaded_file = st.file_uploader("Choose a file", type=["mp4", "avi", "mov", "wav", "mp3"])
-    return uploaded_file
+# Streamlit UI
+st.title("Simple Video Editor")
 
-def add_clip(file):
-    if file:
-        temp_path = f"temp/{file.name}"
-        with open(temp_path, "wb") as f:
-            f.write(file.read())
-        return temp_path
-    return None
+# File uploader
+uploaded_file = st.file_uploader("Upload a video", type=["mp4", "avi", "mov"])
+if uploaded_file:
+    temp_video_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
+    with open(temp_video_path, "wb") as f:
+        f.write(uploaded_file.read())
+    
+    st.video(temp_video_path)
+    video_frames = read_frames(temp_video_path)
+    st.write(f"Uploaded video with {len(video_frames)} frames.")
 
-def split_video(video, time):
-    video_clip = VideoFileClip(video)
-    split_video = video_clip.subclip(0, time)
-    return split_video
+# Overlay upload
+overlay_file = st.file_uploader("Upload an overlay (image)", type=["png", "jpg", "jpeg"])
+if overlay_file:
+    overlay_image = Image.open(overlay_file)
+    overlay_np = np.array(overlay_image)
+    overlays.append(overlay_np)
+    st.image(overlay_image, caption="Uploaded Overlay")
 
-def delete_clip(index, clips):
-    if index >= 0 and index < len(clips):
-        del clips[index]
+# Render the timeline and overlays
+if video_frames:
+    st.header("Timeline and Overlays")
+    frame_index = st.slider("Frame", 0, len(video_frames) - 1, 0)
+    current_frame = video_frames[frame_index]
+    
+    # Apply overlays
+    for overlay in overlays:
+        x_offset = st.slider("Overlay X offset", 0, current_frame.shape[1], 0)
+        y_offset = st.slider("Overlay Y offset", 0, current_frame.shape[0], 0)
+        y1, y2 = y_offset, y_offset + overlay.shape[0]
+        x1, x2 = x_offset, x_offset + overlay.shape[1]
+        alpha_overlay = overlay[:, :, 3] / 255.0
+        alpha_frame = 1.0 - alpha_overlay
+        for c in range(0, 3):
+            current_frame[y1:y2, x1:x2, c] = (alpha_overlay * overlay[:, :, c] +
+                                              alpha_frame * current_frame[y1:y2, x1:x2, c])
+    
+    st.image(current_frame, channels="BGR")
 
-def render_timeline():
-    st.sidebar.header("Timeline")
-    st.sidebar.write("Drag and drop your assets here")
+# Split and delete functionality
+if st.button("Split Video (Ctrl+B)"):
+    split_time = st.number_input("Split Time (seconds)", min_value=0, step=1)
+    fps = 24  # Assuming a default FPS of 24
+    split_frame = int(split_time * fps)
+    if split_frame < len(video_frames):
+        first_part = video_frames[:split_frame]
+        second_part = video_frames[split_frame:]
+        save_video(first_part, "first_part.mp4", fps)
+        save_video(second_part, "second_part.mp4", fps)
+        st.write("Video split at frame", split_frame)
+        st.video("first_part.mp4")
+        st.video("second_part.mp4")
 
-    timeline = st_drag_and_drop("Drag your assets", allowed_extensions=["mp4", "wav", "mp3"])
+if st.button("Delete Selected Clip (Del)"):
+    index_to_delete = st.number_input("Index of frame to delete", min_value=0, step=1)
+    if 0 <= index_to_delete < len(video_frames):
+        del video_frames[index_to_delete]
+        st.write(f"Deleted frame at index {index_to_delete}")
 
-    if timeline:
-        for file in timeline:
-            if file['type'] == 'video':
-                video_clips.append(file['file'])
-            elif file['type'] == 'audio':
-                audio_clips.append(file['file'])
-            elif file['type'] == 'overlay':
-                overlays.append(file['file'])
-
-def render_preview(video_path):
-    video_clip = VideoFileClip(video_path)
-    st.video(video_path)
-    st.write(f"Preview of: {video_path}")
-
-def main():
-    st.title("Simple Video Editor")
-
-    if not os.path.exists("temp"):
-        os.makedirs("temp")
-
-    uploaded_file = upload_file()
-
-    if uploaded_file:
-        video_path = add_clip(uploaded_file)
-        st.write(f"Uploaded video: {video_path}")
-        video_clips.append(video_path)
-
-    if st.button("Render Video"):
-        if video_clips:
-            final_clip = concatenate_videoclips([VideoFileClip(v) for v in video_clips])
-            final_clip.write_videofile("output.mp4")
-            st.video("output.mp4")
-            st.write("Video saved as output.mp4")
-
-    render_timeline()
-
-    if st.button("Split Video (Ctrl+B)"):
-        if video_clips:
-            split_time = st.number_input("Split Time (seconds)", min_value=0, step=1)
-            split_clip = split_video(video_clips[0], split_time)
-            st.write(f"Video split at {split_time} seconds")
-
-    if st.button("Delete Selected Clip (Del)"):
-        if video_clips:
-            index_to_delete = st.number_input("Index of clip to delete", min_value=0, step=1)
-            delete_clip(index_to_delete, video_clips)
-            st.write(f"Deleted clip at index {index_to_delete}")
-
-if __name__ == "__main__":
-    main()
+# Render final video
+if st.button("Render Final Video"):
+    fps = 24  # Assuming a default FPS of 24
+    save_video(video_frames, "final_output.mp4", fps)
+    st.video("final_output.mp4")
+    st.write("Final video saved as final_output.mp4")
